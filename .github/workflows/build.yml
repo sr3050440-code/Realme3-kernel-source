@@ -188,7 +188,7 @@ jobs:
       # 9. UPLOAD TO GITHUB ACTIONS
       # ============================================================
       - name: Upload Kernel Zip
-        uses: assets/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: Realme3i-Kernel-4.14.186
           path: Realme3i-Kernel-4.14.186.zip
