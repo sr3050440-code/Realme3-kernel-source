@@ -1,27 +1,30 @@
-name: Realme 3i Kernel 4.14.186 Build
+name: Realme 3i Kernel Build
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Realme 3i Kernel
-    runs-on: ubuntu-20.04
+    name: Build Kernel
+    runs-on: ubuntu-22.04
 
     steps:
-      # ----------------------------------------------------------
-      # 1. Checkout
-      # ----------------------------------------------------------
-      - name: Checkout Kernel Source
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ----------------------------------------------------------
-      # 2. Dependencies
-      # ----------------------------------------------------------
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+
       - name: Install Dependencies
-        shell: bash
         run: |
           sudo apt-get update
 
@@ -34,271 +37,349 @@ jobs:
             git \
             libelf-dev \
             libssl-dev \
-            libncurses5-dev \
             libncurses-dev \
             libgnutls28-dev \
             rsync \
             unzip \
             wget \
             xz-utils \
-            zip
+            zip \
+            python3 \
+            file
 
-          echo "Dependencies installed"
 
-      # ----------------------------------------------------------
-      # 3. Python 2
-      # ----------------------------------------------------------
-      - name: Setup Python 2
-        shell: bash
+      # ============================================================
+      # SYSTEM INFORMATION
+      # ============================================================
+
+      - name: Show Build Environment
         run: |
-          if ! command -v python2 >/dev/null 2>&1; then
-            wget -q https://bootstrap.pypa.io/pip/2.7/get-pip.py -O /tmp/get-pip.py
-            sudo apt-get install -y python2-minimal || true
-          fi
+          echo "=========================================="
+          echo "Ubuntu"
+          echo "=========================================="
+          lsb_release -a || true
 
-          if command -v python2 >/dev/null 2>&1; then
-            python2 --version
-          else
-            echo "Python 2 is not available from apt"
-          fi
+          echo ""
+          echo "Kernel:"
+          uname -a
 
-      # ----------------------------------------------------------
-      # 4. GCC 4.9 Toolchains
-      # ----------------------------------------------------------
-      - name: Download Android GCC 4.9
-        shell: bash
+          echo ""
+          echo "CPU:"
+          nproc
+
+          echo ""
+          echo "Memory:"
+          free -h
+
+
+      # ============================================================
+      # GCC 4.9 AARCH64
+      # ============================================================
+
+      - name: Download AArch64 GCC 4.9
         run: |
           set -e
 
           mkdir -p "$GITHUB_WORKSPACE/toolchains"
 
-          git clone --depth=1 \
+          git clone \
+            --depth=1 \
             --branch android10-release \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             "$GITHUB_WORKSPACE/toolchains/gcc64"
 
-          git clone --depth=1 \
+          test -x \
+            "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
+
+          "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc" \
+            --version
+
+
+      # ============================================================
+      # GCC 4.9 ARM32
+      # ============================================================
+
+      - name: Download ARM32 GCC 4.9
+        run: |
+          set -e
+
+          git clone \
+            --depth=1 \
             --branch android10-release \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
             "$GITHUB_WORKSPACE/toolchains/gcc32"
 
-          test -x "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
-          test -x "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
+          test -x \
+            "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
 
-          "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc" --version
-          "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc" --version
+          "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc" \
+            --version
 
-      # ----------------------------------------------------------
-      # 5. Kernel version
-      # ----------------------------------------------------------
-      - name: Check Kernel Source
-        shell: bash
+
+      # ============================================================
+      # TOOLCHAIN VARIABLES
+      # ============================================================
+
+      - name: Setup Toolchain
         run: |
-          echo "Kernel Makefile:"
+          echo "CROSS_COMPILE=$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
+
+          echo "CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-" >> "$GITHUB_ENV"
+
+          echo "ARCH=arm64" >> "$GITHUB_ENV"
+          echo "SUBARCH=arm64" >> "$GITHUB_ENV"
+
+          echo "HOSTCFLAGS=-fcommon" >> "$GITHUB_ENV"
+          echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
+          echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
+
+
+      # ============================================================
+      # CHECK KERNEL VERSION
+      # ============================================================
+
+      - name: Check Kernel Version
+        run: |
+          echo "=========================================="
+          echo "Kernel Version"
+          echo "=========================================="
+
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
 
           echo ""
-          echo "Searching defconfig..."
+          make --version | head -n 1
 
-          find arch -type f \
-            \( -name '*oppo6771*' -o -name '*18601*' \) \
-            | sort || true
 
-      # ----------------------------------------------------------
-      # 6. Patch kernel to 4.14.186
-      # ----------------------------------------------------------
-      - name: Apply Linux 4.14.186 Patch
-        shell: bash
+      # ============================================================
+      # FIND DEFCONFIG
+      # ============================================================
+
+      - name: Find Defconfig
         run: |
-          set -e
+          echo "Searching for oppo6771 / 18601 defconfig..."
 
-          CURRENT_SUBLEVEL=$(grep '^SUBLEVEL' Makefile | awk '{print $3}')
+          find arch/arm64/configs \
+            -type f \
+            \( \
+              -iname '*oppo*' \
+              -o \
+              -iname '*6771*' \
+              -o \
+              -iname '*18601*' \
+            \) \
+            | sort
 
-          echo "Current kernel sublevel: $CURRENT_SUBLEVEL"
 
-          if [ "$CURRENT_SUBLEVEL" = "186" ]; then
-            echo "Kernel is already 4.14.186"
-            exit 0
-          fi
+      # ============================================================
+      # VERIFY DEFCONFIG
+      # ============================================================
 
-          if [ "$CURRENT_SUBLEVEL" != "146" ]; then
-            echo "Expected 4.14.146 source."
-            echo "Found:"
-            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
-            exit 1
-          fi
-
-          wget -q \
-            https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
-
-          unxz patch-4.14.186.xz
-
-          patch -p1 \
-            --forward \
-            --exclude=Makefile \
-            < patch-4.14.186
-
-          sed -i \
-            's/^SUBLEVEL = 146$/SUBLEVEL = 186/' \
-            Makefile
-
-          echo ""
-          echo "Final kernel version:"
-          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
-
-      # ----------------------------------------------------------
-      # 7. Find defconfig
-      # ----------------------------------------------------------
       - name: Verify Defconfig
-        shell: bash
         run: |
           set -e
 
           CONFIG="arch/arm64/configs/oppo6771_18601_defconfig"
 
           if [ ! -f "$CONFIG" ]; then
-            echo "ERROR: $CONFIG not found!"
             echo ""
-            echo "Available oppo/6771 configs:"
-            find arch/arm64/configs -type f \
-              \( -iname '*oppo*' -o -iname '*6771*' \) \
+            echo "ERROR: Defconfig not found:"
+            echo "$CONFIG"
+            echo ""
+
+            find arch/arm64/configs \
+              -type f \
               | sort
 
             exit 1
           fi
 
-          echo "Found:"
+          echo "Defconfig found:"
           ls -lh "$CONFIG"
 
-      # ----------------------------------------------------------
-      # 8. Configure
-      # ----------------------------------------------------------
-      - name: Configure Kernel
-        shell: bash
-        env:
-          ARCH: arm64
-          SUBARCH: arm64
+
+      # ============================================================
+      # CREATE OUTPUT DIRECTORY
+      # ============================================================
+
+      - name: Prepare Build Directory
         run: |
-          set -o pipefail
-
-          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
-          export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
-
           rm -rf out
           mkdir -p out
 
+          echo "Output directory:"
+          pwd
+          ls -la
+
+
+      # ============================================================
+      # DEFCONFIG
+      # ============================================================
+
+      - name: Configure Kernel
+        shell: bash
+        run: |
+          set -o pipefail
+
           echo "=========================================="
-          echo "Running defconfig"
+          echo "CONFIGURING KERNEL"
           echo "=========================================="
 
-          make O=out \
+          make \
+            O=out \
             ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            HOSTCXXFLAGS="$HOSTCXXFLAGS" \
+            KCFLAGS="$KCFLAGS" \
             oppo6771_18601_defconfig \
             2>&1 | tee defconfig.log
 
           echo ""
           echo "=========================================="
-          echo "Checking generated config"
+          echo "CONFIG CHECK"
           echo "=========================================="
 
-          test -f out/.config
+          if [ ! -f out/.config ]; then
+            echo "ERROR: .config was not generated"
+            exit 1
+          fi
 
-          echo "CONFIG generated successfully"
+          echo ".config generated successfully"
 
           cp out/.config config-used
 
-      # ----------------------------------------------------------
-      # 9. Kernel compatibility fixes
-      # ----------------------------------------------------------
-      - name: Apply Kernel Build Fixes
+
+      # ============================================================
+      # KERNEL BUILD FIXES
+      # ============================================================
+
+      - name: Apply Compatibility Fixes
         shell: bash
         run: |
           set -e
 
-          echo "Applying compatibility fixes..."
+          echo "Applying old-kernel compatibility fixes..."
 
-          # Old DTC lexer
+          # --------------------------------------------------------
+          # DTC lexer compatibility
+          # --------------------------------------------------------
+
           if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
             sed -i \
               's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' \
-              scripts/dtc/dtc-lexer.lex.c_shipped
+              scripts/dtc/dtc-lexer.lex.c_shipped || true
           fi
 
-          # Old host compiler compatibility
-          export KCFLAGS="-Wno-error"
+
+          # --------------------------------------------------------
+          # Host compiler compatibility
+          # --------------------------------------------------------
+
           export HOSTCFLAGS="-fcommon"
           export HOSTCXXFLAGS="-fcommon"
 
-          # Disable problematic OPPO fingerprint driver
-          if grep -q '^CONFIG_OPPO_FINGERPRINT=y' out/.config; then
-            sed -i \
-              's/^CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/' \
-              out/.config
-          fi
 
-          echo "Fixes applied"
+          # --------------------------------------------------------
+          # Disable warnings-as-errors
+          # --------------------------------------------------------
 
-      # ----------------------------------------------------------
-      # 10. Build kernel
-      # ----------------------------------------------------------
+          sed -i \
+            's/-Werror//g' \
+            Makefile \
+            scripts/Makefile* \
+            2>/dev/null || true
+
+
+          echo "Compatibility fixes completed."
+
+
+      # ============================================================
+      # BUILD KERNEL
+      # ============================================================
+
       - name: Build Kernel
         shell: bash
-        env:
-          ARCH: arm64
-          SUBARCH: arm64
-          KCFLAGS: -Wno-error
-          HOSTCFLAGS: -fcommon
-          HOSTCXXFLAGS: -fcommon
         run: |
           set -o pipefail
-
-          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
-          export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
 
           echo "=========================================="
           echo "BUILDING KERNEL"
           echo "=========================================="
 
-          make -j"$(nproc)" \
+          echo "ARCH=$ARCH"
+          echo "CROSS_COMPILE=$CROSS_COMPILE"
+          echo "CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32"
+
+          make \
+            -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            KCFLAGS="$KCFLAGS" \
             HOSTCFLAGS="$HOSTCFLAGS" \
             HOSTCXXFLAGS="$HOSTCXXFLAGS" \
+            KCFLAGS="$KCFLAGS" \
             2>&1 | tee build.log
 
-      # ----------------------------------------------------------
-      # 11. Check output
-      # ----------------------------------------------------------
+
+      # ============================================================
+      # CHECK BUILD OUTPUT
+      # ============================================================
+
       - name: Check Kernel Output
         shell: bash
         run: |
           set -e
 
-          echo "Kernel output:"
+          echo "=========================================="
+          echo "BUILD OUTPUT"
+          echo "=========================================="
+
           find out/arch/arm64/boot \
-            -maxdepth 3 \
+            -maxdepth 4 \
             -type f \
-            | sort
+            -exec ls -lh {} \;
+
 
           if [ ! -f out/arch/arm64/boot/Image.gz ]; then
-            echo "ERROR: Image.gz not generated"
+            echo ""
+            echo "ERROR: Image.gz was not generated."
             exit 1
           fi
 
-          echo "Image.gz generated successfully"
+          echo ""
+          echo "Image.gz generated successfully."
 
-      # ----------------------------------------------------------
-      # 12. Generate Image.gz-dtb
-      # ----------------------------------------------------------
+
+      # ============================================================
+      # DTB SEARCH
+      # ============================================================
+
+      - name: Find DTB
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "DTB FILES"
+          echo "=========================================="
+
+          find out/arch/arm64/boot/dts \
+            -type f \
+            -name '*.dtb' \
+            -exec ls -lh {} \; \
+            || true
+
+
+      # ============================================================
+      # GENERATE IMAGE.GZ-DTB
+      # ============================================================
+
       - name: Generate Image.gz-dtb
         shell: bash
         run: |
           set -e
+
+          IMAGE="out/arch/arm64/boot/Image.gz"
 
           DTB=$(find out/arch/arm64/boot/dts \
             -type f \
@@ -306,23 +387,38 @@ jobs:
             | head -n 1)
 
           if [ -z "$DTB" ]; then
-            echo "No DTB found"
+            echo "No DTB found."
+
+            echo ""
+            echo "Available boot files:"
+            find out/arch/arm64/boot \
+              -type f \
+              | sort
+
             exit 1
           fi
 
-          echo "Using DTB:"
+          echo "Image:"
+          echo "$IMAGE"
+
+          echo ""
+          echo "DTB:"
           echo "$DTB"
 
           cat \
-            out/arch/arm64/boot/Image.gz \
+            "$IMAGE" \
             "$DTB" \
             > out/arch/arm64/boot/Image.gz-dtb
 
-          ls -lh out/arch/arm64/boot/Image.gz*
-          
-      # ----------------------------------------------------------
-      # 13. Package
-      # ----------------------------------------------------------
+          echo ""
+          echo "Generated:"
+          ls -lh out/arch/arm64/boot/Image.gz-dtb
+
+
+      # ============================================================
+      # PACKAGE
+      # ============================================================
+
       - name: Package Kernel
         shell: bash
         run: |
@@ -331,10 +427,10 @@ jobs:
           rm -rf kernel-output
           mkdir -p kernel-output
 
-          cp out/arch/arm64/boot/Image.gz-dtb \
+          cp out/arch/arm64/boot/Image.gz \
             kernel-output/
 
-          cp out/arch/arm64/boot/Image.gz \
+          cp out/arch/arm64/boot/Image.gz-dtb \
             kernel-output/
 
           cp out/.config \
@@ -346,18 +442,41 @@ jobs:
           cp build.log \
             kernel-output/
 
+
+          echo "=========================================="
+          echo "PACKAGING"
+          echo "=========================================="
+
           cd kernel-output
 
           zip -9 -r \
-            ../Realme3i-Kernel-4.14.186.zip \
+            ../Realme3-Kernel.zip \
             .
 
-      # ----------------------------------------------------------
-      # 14. Upload artifact
-      # ----------------------------------------------------------
-      - name: Upload Kernel
+
+      # ============================================================
+      # UPLOAD ARTIFACT
+      # ============================================================
+
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Realme3i-Kernel-4.14.186
-          path: Realme3i-Kernel-4.14.186.zip
+          name: Realme3-Kernel
+          path: Realme3-Kernel.zip
           if-no-files-found: error
+
+
+      # ============================================================
+      # UPLOAD LOGS
+      # ============================================================
+
+      - name: Upload Build Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Realme3-Build-Logs
+          path: |
+            defconfig.log
+            build.log
+            config-used
+          if-no-files-found: ignore
