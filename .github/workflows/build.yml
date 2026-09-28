@@ -129,29 +129,21 @@ jobs:
             sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
           fi
 
-          # FIX 1: REMOVE TOUCHSCREEN FROM PARENT KCONFIG TO FIX RECURSIVE DEPENDENCY
-          HQ_KCONFIG="drivers/input/touchscreen/mediatek/hq/Kconfig"
-          if [ -f "$HQ_KCONFIG" ]; then
-            sed -i '/ipi_touch_driver/d' "$HQ_KCONFIG" || true
-          fi
-
-          # Also clear out the specific touchscreen Kconfig file if it exists
-          TOUCH_KCONFIG="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8/Kconfig"
-          if [ -f "$TOUCH_KCONFIG" ]; then
-            rm -f "$TOUCH_KCONFIG" || true
-          fi
-
-          # FIX 2: ADD PROPER STUB FUNCTIONS TO FIX UNDEFINED REFERENCES
+          # CLEANLY WIPE fbconfig_kdebug.c TO AVOID MULTIPLE DEFINITIONS
           FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
-          cat << 'EOF' > "$FB_DEBUG_FILE"
-          int panel_serial_number_read(char *buf) { return 0; }
-          int lcm_id_info_read(char *buf) { return 0; }
-          int fbconfig_get_esd_check_test(void) { return 0; }
-          int Panel_Master_dsi_config_entry(void) { return 0; }
-          int PanelMaster_Init(void) { return 0; }
-          void PanelMaster_Doinit(void) {}
-          int panel_master_dsi_config(void) { return 0; }
-          EOF
+          if [ -f "$FB_DEBUG_FILE" ]; then
+            > "$FB_DEBUG_FILE"
+          fi
+
+          # REMOVE PROBLEMATIC TOUCHSCREEN FOLDER & MAKEFILE TO STOP RECURSIVE DEPENDENCY
+          TOUCH_DIR="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8"
+          if [ -d "$TOUCH_DIR" ]; then
+            rm -rf "$TOUCH_DIR"
+          fi
+          HQ_MAKEFILE="drivers/input/touchscreen/mediatek/hq/Makefile"
+          if [ -f "$HQ_MAKEFILE" ]; then
+            > "$HQ_MAKEFILE"
+          fi
 
           # Compile Kernel with all warnings/errors ignored
           make -j"$(nproc)" \
