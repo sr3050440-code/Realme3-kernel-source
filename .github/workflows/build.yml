@@ -36,7 +36,7 @@ jobs:
           sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python2
 
       # ============================================================
-      # 3. UPSTREAM KERNEL TO 4.14.186 (FIXED MAKEFILE PATCH)
+      # 3. UPSTREAM KERNEL TO 4.14.186
       # ============================================================
       - name: Upstream Patch to 4.14.186
         shell: bash
@@ -93,7 +93,7 @@ jobs:
             oppo6771_18601_defconfig
 
       # ============================================================
-      # 6. COMPILE KERNEL (FIX OPPO QUALCOMM HEADER & GCC 11)
+      # 6. COMPILE KERNEL
       # ============================================================
       - name: Compile Kernel
         shell: bash
@@ -114,9 +114,14 @@ jobs:
             sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
           fi
 
-          # Fix oppo_secure_common missing Qualcomm header (Globally search & replace in drivers)
+          # Fix Qualcomm SMEM header issue
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
+
+          # Fix OPPO Fingerprint Empty Macro Error
+          if [ -f "drivers/input/oppo_fp_drivers/oppo_fp_common/oppo_fp_common.c" ]; then
+            sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' drivers/input/oppo_fp_drivers/oppo_fp_common/oppo_fp_common.c
+          fi
 
           make -j"$(nproc)" \
             O=out \
