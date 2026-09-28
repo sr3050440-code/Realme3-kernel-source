@@ -1,0 +1,161 @@
+name: Realme 3i Kernel 4.14.186 Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT SOURCE CODE
+      # ============================================================
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          repository: sr3050440-code/Realme3-kernel-source
+          ref: master
+          fetch-depth: 1
+
+      # ============================================================
+      # 2. INSTALL BUILD DEPENDENCIES
+      # ============================================================
+      - name: Install Build Dependencies
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential flex libssl-dev libncurses5-dev \
+            libncurses-dev libelf-dev libgnutls28-dev clang lld llvm \
+            git zip unzip cpio rsync python2.7 python2.7-minimal xz-utils patch
+
+          sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python2
+
+      # ============================================================
+      # 3. UPSTREAM KERNEL TO 4.14.186 (FROM 4.14.146)
+      # ============================================================
+      - name: Upstream Patch to 4.14.186
+        shell: bash
+        run: |
+          echo "============================================"
+          echo "UPGRADING KERNEL VERSION TO 4.14.186"
+          echo "============================================"
+
+          # Official 4.14.186 Linux Patch download
+          wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
+          xz -d patch-4.14.186.xz
+
+          # Apply Patch
+          patch -p1 --forward < patch-4.14.186 || echo "Bypassing minor warnings..."
+
+          echo "Kernel Source version upgraded!"
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
+
+      # ============================================================
+      # 4. DOWNLOAD ANDROID GCC 4.9 TOOLCHAINS
+      # ============================================================
+      - name: Download Android 10 GCC 4.9 Toolchains
+        shell: bash
+        run: |
+          rm -rf toolchains
+          mkdir -p toolchains/gcc64 toolchains/gcc32
+
+          git clone --depth=1 --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            toolchains/gcc64
+
+          git clone --depth=1 --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
+            toolchains/gcc32
+
+      # ============================================================
+      # 5. CONFIGURE KERNEL
+      # ============================================================
+      - name: Configure Kernel (RMX1821_defconfig)
+        shell: bash
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PYTHON=python2.7
+          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
+          export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
+
+          rm -rf out
+
+          make O=out \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            RMX1821_defconfig
+
+      # ============================================================
+      # 6. COMPILE KERNEL
+      # ============================================================
+      - name: Compile Kernel
+        shell: bash
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export PYTHON=python2.7
+          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
+          export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
+
+          make -j"$(nproc)" \
+            O=out \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            PYTHON="$PYTHON" \
+            2>&1 | tee build.log
+
+      # ============================================================
+      # 7. FORCE MERGE DTB (PREVENT BOOTLOOP)
+      # ============================================================
+      - name: Generate Safe Image.gz-dtb
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "CHECKING KERNEL IMAGE AND DTB"
+          echo "========================================"
+
+          DTB_FILE=$(find out/arch/arm64/boot/dts/ -name "*.dtb" | head -n 1)
+
+          if [ -f "out/arch/arm64/boot/Image.gz" ] && [ -n "$DTB_FILE" ]; then
+            echo "Merging Image.gz with DTB: $DTB_FILE"
+            cat out/arch/arm64/boot/Image.gz $DTB_FILE > out/arch/arm64/boot/Image.gz-dtb
+            echo "SUCCESS: Image.gz-dtb created!"
+          fi
+
+      # ============================================================
+      # 8. COLLECT & ZIP ARTIFACTS
+      # ============================================================
+      - name: Package Output
+        shell: bash
+        run: |
+          rm -rf kernel-output
+          mkdir -p kernel-output
+
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb kernel-output/
+          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
+            cp out/arch/arm64/boot/Image.gz kernel-output/
+          fi
+
+          cp build.log kernel-output/ || true
+
+          cd kernel-output
+          zip -9 -r ../Realme3i-Kernel-4.14.186.zip .
+
+      # ============================================================
+      # 9. UPLOAD TO GITHUB ACTIONS
+      # ============================================================
+      - name: Upload Kernel Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Realme3i-Kernel-4.14.186
+          path: Realme3i-Kernel-4.14.186.zip
+          
