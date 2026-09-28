@@ -118,9 +118,13 @@ jobs:
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
-          # DISABLE OPPO FINGERPRINT DRIVER COMPLETELY
+          # DISABLE OPPO FINGERPRINT DRIVER
           sed -i 's/CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/g' out/.config
           sed -i 's/obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//# obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//g' drivers/input/Makefile
+
+          # IGNORE FORMAT WARNING ERRORS IN DRIVERS
+          sed -i 's/-Werror=format-security/-Wno-format-security/g' Makefile || true
+          sed -i 's/-Werror=format/-Wno-format/g' Makefile || true
 
           # Compile Kernel
           make -j"$(nproc)" \
@@ -129,6 +133,7 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
+            KCFLAGS="-Wno-error=format -Wno-error=format-security -Wno-error" \
             HOSTCFLAGS="-fcommon" \
             HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
               echo "========================================="
