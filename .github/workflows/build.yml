@@ -129,21 +129,29 @@ jobs:
             sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
           fi
 
-          # DISABLE PROBLEMATIC TOUCHSCREEN KCONFIG RECURSIVE DEPENDENCY
+          # FIX 1: REMOVE TOUCHSCREEN FROM PARENT KCONFIG TO FIX RECURSIVE DEPENDENCY
+          HQ_KCONFIG="drivers/input/touchscreen/mediatek/hq/Kconfig"
+          if [ -f "$HQ_KCONFIG" ]; then
+            sed -i '/ipi_touch_driver/d' "$HQ_KCONFIG" || true
+          fi
+
+          # Also clear out the specific touchscreen Kconfig file if it exists
           TOUCH_KCONFIG="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8/Kconfig"
           if [ -f "$TOUCH_KCONFIG" ]; then
             rm -f "$TOUCH_KCONFIG" || true
           fi
 
-          # SAFELY DISABLE fbconfig_kdebug.c TO PREVENT TYPE & COMPILE ERRORS
-          FB_MAKE_FILE="drivers/misc/mediatek/video/mt6771/videox/Makefile"
-          if [ -f "$FB_MAKE_FILE" ]; then
-            sed -i '/fbconfig_kdebug.o/d' "$FB_MAKE_FILE" || true
-          fi
+          # FIX 2: ADD PROPER STUB FUNCTIONS TO FIX UNDEFINED REFERENCES
           FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
-          if [ -f "$FB_DEBUG_FILE" ]; then
-            echo "/* Disabled by build script */" > "$FB_DEBUG_FILE"
-          fi
+          cat << 'EOF' > "$FB_DEBUG_FILE"
+          int panel_serial_number_read(char *buf) { return 0; }
+          int lcm_id_info_read(char *buf) { return 0; }
+          int fbconfig_get_esd_check_test(void) { return 0; }
+          int Panel_Master_dsi_config_entry(void) { return 0; }
+          int PanelMaster_Init(void) { return 0; }
+          void PanelMaster_Doinit(void) {}
+          int panel_master_dsi_config(void) { return 0; }
+          EOF
 
           # Compile Kernel with all warnings/errors ignored
           make -j"$(nproc)" \
