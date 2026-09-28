@@ -118,9 +118,10 @@ jobs:
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
-          # Fix OPPO Fingerprint Empty Macro Error
-          if [ -f "drivers/input/oppo_fp_drivers/oppo_fp_common/oppo_fp_common.c" ]; then
-            sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' drivers/input/oppo_fp_drivers/oppo_fp_common/oppo_fp_common.c
+          # Fix OPPO Fingerprint Empty Macro Error (Recursively across drivers/input/oppo_fp_drivers)
+          if [ -d "drivers/input/oppo_fp_drivers" ]; then
+            find drivers/input/oppo_fp_drivers/ -type f -name "*.c" -exec sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' {} +
+            find drivers/input/oppo_fp_drivers/ -type f -name "*.h" -exec sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' {} +
           fi
 
           make -j"$(nproc)" \
