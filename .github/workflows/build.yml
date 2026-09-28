@@ -84,6 +84,9 @@ jobs:
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
 
+          # REMOVE PROBLEMATIC TOUCHSCREEN FOLDER BEFORE CONFIGURATION
+          rm -rf drivers/input/touchscreen/mediatek/hq
+
           rm -rf out
 
           make O=out \
@@ -122,27 +125,10 @@ jobs:
           sed -i 's/CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/g' out/.config
           sed -i 's/obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//# obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//g' drivers/input/Makefile
 
-          # FORCE FIX ILITEK USESPACE FORMAT ERROR
-          ILITEK_FILE="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8/userspace.c"
-          if [ -f "$ILITEK_FILE" ]; then
-            sed -i 's/ipio_info("%d", count);/ipio_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
-            sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
-          fi
-
           # CLEANLY WIPE fbconfig_kdebug.c TO AVOID MULTIPLE DEFINITIONS
           FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
           if [ -f "$FB_DEBUG_FILE" ]; then
             > "$FB_DEBUG_FILE"
-          fi
-
-          # REMOVE PROBLEMATIC TOUCHSCREEN FOLDER & MAKEFILE TO STOP RECURSIVE DEPENDENCY
-          TOUCH_DIR="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8"
-          if [ -d "$TOUCH_DIR" ]; then
-            rm -rf "$TOUCH_DIR"
-          fi
-          HQ_MAKEFILE="drivers/input/touchscreen/mediatek/hq/Makefile"
-          if [ -f "$HQ_MAKEFILE" ]; then
-            > "$HQ_MAKEFILE"
           fi
 
           # Compile Kernel with all warnings/errors ignored
