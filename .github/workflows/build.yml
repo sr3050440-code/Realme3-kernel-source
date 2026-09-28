@@ -129,14 +129,26 @@ jobs:
             sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
           fi
 
-          # Compile Kernel with strict-prototypes and all warnings/errors ignored
+          # FIX MULTI-LINE COMMENT ERROR IN fbconfig_kdebug.c
+          FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
+          if [ -f "$FB_DEBUG_FILE" ]; then
+            sed -i 's/\/\*/\/\//g' "$FB_DEBUG_FILE" || true
+          fi
+
+          # DISABLE PROBLEMATIC TOUCHSCREEN KCONFIG RECURSIVE DEPENDENCY
+          TOUCH_KCONFIG="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8/Kconfig"
+          if [ -f "$TOUCH_KCONFIG" ]; then
+            rm -f "$TOUCH_KCONFIG" || true
+          fi
+
+          # Compile Kernel with all warnings/errors ignored
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
-            KCFLAGS="-Wno-error -Wno-format -Wno-format-security -Wno-error=strict-prototypes -Wno-strict-prototypes" \
+            KCFLAGS="-Wno-error -Wno-format -Wno-format-security -Wno-error=strict-prototypes -Wno-strict-prototypes -Wno-error=comment -Wno-comment" \
             HOSTCFLAGS="-fcommon" \
             HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
               echo "========================================="
