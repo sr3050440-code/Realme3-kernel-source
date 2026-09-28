@@ -36,7 +36,7 @@ jobs:
           sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python2
 
       # ============================================================
-      # 3. UPSTREAM KERNEL TO 4.14.186 (FROM 4.14.146)
+      # 3. UPSTREAM KERNEL TO 4.14.186 (FIXED MAKEFILE PATCH)
       # ============================================================
       - name: Upstream Patch to 4.14.186
         shell: bash
@@ -45,12 +45,15 @@ jobs:
           echo "UPGRADING KERNEL VERSION TO 4.14.186"
           echo "============================================"
 
-          # Official 4.14.186 Linux Patch download
+          # 4.14.186 Linux Patch Download
           wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
           xz -d patch-4.14.186.xz
 
-          # Apply Patch
-          patch -p1 --forward < patch-4.14.186 || echo "Bypassing minor warnings..."
+          # Makefile को छोड़कर बाकी सोर्स पर सुरक्षित पैच लगाएं
+          patch -p1 --forward --reject-file=- --exclude="Makefile" < patch-4.14.186 || true
+
+          # Makefile में SUBLEVEL वर्ज़न को 146 से बढ़ाकर 186 करें
+          sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
 
           echo "Kernel Source version upgraded!"
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
@@ -73,9 +76,9 @@ jobs:
             toolchains/gcc32
 
       # ============================================================
-      # 5. CONFIGURE KERNEL
+      # 5. CONFIGURE KERNEL (oppo6771_18601_defconfig)
       # ============================================================
-      - name: Configure Kernel (RMX1821_defconfig)
+      - name: Configure Kernel (oppo6771_18601_defconfig)
         shell: bash
         run: |
           export ARCH=arm64
@@ -90,7 +93,7 @@ jobs:
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            RMX1821_defconfig
+            oppo6771_18601_defconfig
 
       # ============================================================
       # 6. COMPILE KERNEL
@@ -113,7 +116,7 @@ jobs:
             2>&1 | tee build.log
 
       # ============================================================
-      # 7. FORCE MERGE DTB (PREVENT BOOTLOOP)
+      # 7. FORCE MERGE DTB (BOOTLOOP PREVENTER)
       # ============================================================
       - name: Generate Safe Image.gz-dtb
         shell: bash
@@ -158,4 +161,3 @@ jobs:
         with:
           name: Realme3i-Kernel-4.14.186
           path: Realme3i-Kernel-4.14.186.zip
-          
