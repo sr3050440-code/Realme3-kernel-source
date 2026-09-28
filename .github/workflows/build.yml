@@ -122,7 +122,19 @@ jobs:
           sed -i 's/CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/g' out/.config
           sed -i 's/obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//# obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//g' drivers/input/Makefile
 
-          # Compile Kernel with KCFLAGS to turn off warnings-as-errors globally
+          # AUTO-FIX: Kconfig Recursive Dependency
+          if [ -f "drivers/input/touchscreen/radiantek/mg/ipi_touch_driver-v1.0.3.8/Kconfig" ]; then
+            sed -i 's/select /# select /g' drivers/input/touchscreen/radiantek/mg/ipi_touch_driver-v1.0.3.8/Kconfig || true
+          fi
+
+          # AUTO-FIX: Touchscreen size_t Format String Error
+          TOUCH_USERSPS="drivers/input/touchscreen/mediatek/hq/spsi/spsi_v1.0.3/spsi_userspace.c"
+          if [ -f "$TOUCH_USERSPS" ]; then
+            sed -i 's/pr_info("%d", (count));/pr_info("%zu", (size_t)(count));/g' "$TOUCH_USERSPS" || true
+            sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$TOUCH_USERSPS" || true
+          fi
+
+          # Compile Kernel
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
