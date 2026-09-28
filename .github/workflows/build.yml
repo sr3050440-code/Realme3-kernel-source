@@ -45,14 +45,11 @@ jobs:
           echo "UPGRADING KERNEL VERSION TO 4.14.186"
           echo "============================================"
 
-          # 4.14.186 Linux Patch Download
           wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
           xz -d patch-4.14.186.xz
 
-          # Makefile को छोड़कर बाकी सोर्स पर सुरक्षित पैच लगाएं
           patch -p1 --forward --reject-file=- --exclude="Makefile" < patch-4.14.186 || true
 
-          # Makefile में SUBLEVEL वर्ज़न को 146 से बढ़ाकर 186 करें
           sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
 
           echo "Kernel Source version upgraded!"
@@ -96,7 +93,7 @@ jobs:
             oppo6771_18601_defconfig
 
       # ============================================================
-      # 6. COMPILE KERNEL
+      # 6. COMPILE KERNEL (WITH PYTHON 2 FIX)
       # ============================================================
       - name: Compile Kernel
         shell: bash
@@ -107,6 +104,11 @@ jobs:
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
 
+          # MediaTek DTS Python Syntax Fix
+          find . -name "DtsGen.py" -exec sed -i 's/print "\(.*\)"/print("\1")/g' {} +
+          find . -name "DtsGen.py" -exec sed -i 's/print ""/print()/g' {} +
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
@@ -116,7 +118,7 @@ jobs:
             2>&1 | tee build.log
 
       # ============================================================
-      # 7. FORCE MERGE DTB (BOOTLOOP PREVENTER)
+      # 7. FORCE MERGE DTB
       # ============================================================
       - name: Generate Safe Image.gz-dtb
         shell: bash
