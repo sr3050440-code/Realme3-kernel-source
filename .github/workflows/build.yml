@@ -114,10 +114,9 @@ jobs:
             sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
           fi
 
-          # Fix oppo_secure_common missing Qualcomm header on MediaTek
-          if [ -f "drivers/input/misc/oppo_secure_common/oppo_secure_common.c" ]; then
-            sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' drivers/input/misc/oppo_secure_common/oppo_secure_common.c
-          fi
+          # Fix oppo_secure_common missing Qualcomm header (Globally search & replace in drivers)
+          find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
+          find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
           make -j"$(nproc)" \
             O=out \
