@@ -109,7 +109,7 @@ jobs:
           find . -name "DtsGen.py" -exec sed -i 's/print ""/print()/g' {} +
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
 
-          # Fix 'multiple definition of yylloc' for GCC 10/11/12
+          # Fix 'multiple definition of yylloc'
           if [ -f "scripts/dtc/dtc-lexer.lex.c_shipped" ]; then
             sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
           fi
@@ -118,11 +118,12 @@ jobs:
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
-          # PERMANENT FIX FOR OPPO FINGERPRINT MACRO ERROR
+          # OPPO Fingerprint Macro Fix
           if [ -d "drivers/input/oppo_fp_drivers" ]; then
             find drivers/input/oppo_fp_drivers -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 18601\n#endif' {} +
           fi
 
+          # Compile and trap exact error on failure
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
@@ -131,8 +132,13 @@ jobs:
             PYTHON="$PYTHON" \
             KCFLAGS="-DCONFIG_OPPO_FINGERPRINT_PROJECT=18601" \
             HOSTCFLAGS="-fcommon" \
-            HOSTCXXFLAGS="-fcommon" \
-            2>&1 | tee build.log
+            HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
+              echo "========================================="
+              echo "  EXACT BUILD ERROR FOUND BELOW:"
+              echo "========================================="
+              grep -C 5 -i "error:" build.log | tail -n 40
+              exit 1
+            }
 
       # ============================================================
       # 7. FORCE MERGE DTB
