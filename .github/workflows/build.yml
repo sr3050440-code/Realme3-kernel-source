@@ -129,14 +129,14 @@ jobs:
             sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
           fi
 
-          # Compile Kernel with all errors ignored to ensure build success
+          # Compile Kernel with strict-prototypes and all warnings/errors ignored
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
-            KCFLAGS="-Wno-error -Wno-format -Wno-format-security" \
+            KCFLAGS="-Wno-error -Wno-format -Wno-format-security -Wno-error=strict-prototypes -Wno-strict-prototypes" \
             HOSTCFLAGS="-fcommon" \
             HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
               echo "========================================="
