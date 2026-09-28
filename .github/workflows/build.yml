@@ -129,16 +129,20 @@ jobs:
             sed -i 's/pr_info("%d", count);/pr_info("%zu", (size_t)count);/g' "$ILITEK_FILE" || true
           fi
 
-          # FIX MULTI-LINE COMMENT ERROR IN fbconfig_kdebug.c
-          FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
-          if [ -f "$FB_DEBUG_FILE" ]; then
-            sed -i 's/\/\*/\/\//g' "$FB_DEBUG_FILE" || true
-          fi
-
           # DISABLE PROBLEMATIC TOUCHSCREEN KCONFIG RECURSIVE DEPENDENCY
           TOUCH_KCONFIG="drivers/input/touchscreen/mediatek/hq/ipi_touch_driver-v1.0.3.8/Kconfig"
           if [ -f "$TOUCH_KCONFIG" ]; then
             rm -f "$TOUCH_KCONFIG" || true
+          fi
+
+          # SAFELY DISABLE fbconfig_kdebug.c TO PREVENT TYPE & COMPILE ERRORS
+          FB_MAKE_FILE="drivers/misc/mediatek/video/mt6771/videox/Makefile"
+          if [ -f "$FB_MAKE_FILE" ]; then
+            sed -i '/fbconfig_kdebug.o/d' "$FB_MAKE_FILE" || true
+          fi
+          FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
+          if [ -f "$FB_DEBUG_FILE" ]; then
+            echo "/* Disabled by build script */" > "$FB_DEBUG_FILE"
           fi
 
           # Compile Kernel with all warnings/errors ignored
