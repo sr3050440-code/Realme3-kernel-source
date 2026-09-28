@@ -93,7 +93,7 @@ jobs:
             oppo6771_18601_defconfig
 
       # ============================================================
-      # 6. COMPILE KERNEL (WITH YYLLOC & GCC 11 FIX)
+      # 6. COMPILE KERNEL (FIX OPPO QUALCOMM HEADER & GCC 11)
       # ============================================================
       - name: Compile Kernel
         shell: bash
@@ -112,6 +112,11 @@ jobs:
           # Fix 'multiple definition of yylloc' for GCC 10/11/12
           if [ -f "scripts/dtc/dtc-lexer.lex.c_shipped" ]; then
             sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
+          fi
+
+          # Fix oppo_secure_common missing Qualcomm header on MediaTek
+          if [ -f "drivers/input/misc/oppo_secure_common/oppo_secure_common.c" ]; then
+            sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' drivers/input/misc/oppo_secure_common/oppo_secure_common.c
           fi
 
           make -j"$(nproc)" \
