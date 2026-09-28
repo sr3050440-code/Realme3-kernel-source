@@ -93,7 +93,7 @@ jobs:
             oppo6771_18601_defconfig
 
       # ============================================================
-      # 6. COMPILE KERNEL (WITH PYTHON 2 FIX)
+      # 6. COMPILE KERNEL (WITH YYLLOC & GCC 11 FIX)
       # ============================================================
       - name: Compile Kernel
         shell: bash
@@ -109,12 +109,19 @@ jobs:
           find . -name "DtsGen.py" -exec sed -i 's/print ""/print()/g' {} +
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
 
+          # Fix 'multiple definition of yylloc' for GCC 10/11/12
+          if [ -f "scripts/dtc/dtc-lexer.lex.c_shipped" ]; then
+            sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
+          fi
+
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
+            HOSTCFLAGS="-fcommon" \
+            HOSTCXXFLAGS="-fcommon" \
             2>&1 | tee build.log
 
       # ============================================================
