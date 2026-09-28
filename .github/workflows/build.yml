@@ -5,192 +5,359 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    name: Build Realme 3i Kernel
+    runs-on: ubuntu-20.04
 
     steps:
-
-      # ============================================================
-      # 1. CHECKOUT SOURCE CODE
-      # ============================================================
-      - name: Checkout Source Code
+      # ----------------------------------------------------------
+      # 1. Checkout
+      # ----------------------------------------------------------
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: sr3050440-code/Realme3-kernel-source
-          ref: master
           fetch-depth: 1
 
-      # ============================================================
-      # 2. INSTALL BUILD DEPENDENCIES
-      # ============================================================
-      - name: Install Build Dependencies
+      # ----------------------------------------------------------
+      # 2. Dependencies
+      # ----------------------------------------------------------
+      - name: Install Dependencies
         shell: bash
-        env:
-          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential flex libssl-dev libncurses5-dev \
-            libncurses-dev libelf-dev libgnutls28-dev clang lld llvm \
-            git zip unzip cpio rsync python2.7 python2.7-minimal xz-utils patch python3
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            libncurses5-dev \
+            libncurses-dev \
+            libgnutls28-dev \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip
 
-          sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python2
+          echo "Dependencies installed"
 
-      # ============================================================
-      # 3. UPSTREAM KERNEL TO 4.14.186
-      # ============================================================
-      - name: Upstream Patch to 4.14.186
+      # ----------------------------------------------------------
+      # 3. Python 2
+      # ----------------------------------------------------------
+      - name: Setup Python 2
         shell: bash
         run: |
-          echo "============================================"
-          echo "UPGRADING KERNEL VERSION TO 4.14.186"
-          echo "============================================"
+          if ! command -v python2 >/dev/null 2>&1; then
+            wget -q https://bootstrap.pypa.io/pip/2.7/get-pip.py -O /tmp/get-pip.py
+            sudo apt-get install -y python2-minimal || true
+          fi
 
-          wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
-          xz -d patch-4.14.186.xz
+          if command -v python2 >/dev/null 2>&1; then
+            python2 --version
+          else
+            echo "Python 2 is not available from apt"
+          fi
 
-          patch -p1 --forward --reject-file=- --exclude="Makefile" < patch-4.14.186 || true
+      # ----------------------------------------------------------
+      # 4. GCC 4.9 Toolchains
+      # ----------------------------------------------------------
+      - name: Download Android GCC 4.9
+        shell: bash
+        run: |
+          set -e
 
-          sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
+          mkdir -p "$GITHUB_WORKSPACE/toolchains"
 
-          echo "Kernel Source version upgraded!"
+          git clone --depth=1 \
+            --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            "$GITHUB_WORKSPACE/toolchains/gcc64"
+
+          git clone --depth=1 \
+            --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
+            "$GITHUB_WORKSPACE/toolchains/gcc32"
+
+          test -x "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
+          test -x "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
+
+          "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc" --version
+          "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc" --version
+
+      # ----------------------------------------------------------
+      # 5. Kernel version
+      # ----------------------------------------------------------
+      - name: Check Kernel Source
+        shell: bash
+        run: |
+          echo "Kernel Makefile:"
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
 
-      # ============================================================
-      # 4. DOWNLOAD ANDROID GCC 4.9 TOOLCHAINS
-      # ============================================================
-      - name: Download Android 10 GCC 4.9 Toolchains
+          echo ""
+          echo "Searching defconfig..."
+
+          find arch -type f \
+            \( -name '*oppo6771*' -o -name '*18601*' \) \
+            | sort || true
+
+      # ----------------------------------------------------------
+      # 6. Patch kernel to 4.14.186
+      # ----------------------------------------------------------
+      - name: Apply Linux 4.14.186 Patch
         shell: bash
         run: |
-          rm -rf toolchains
-          mkdir -p toolchains/gcc64 toolchains/gcc32
+          set -e
 
-          git clone --depth=1 --branch android10-release \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
-            toolchains/gcc64
+          CURRENT_SUBLEVEL=$(grep '^SUBLEVEL' Makefile | awk '{print $3}')
 
-          git clone --depth=1 --branch android10-release \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
-            toolchains/gcc32
+          echo "Current kernel sublevel: $CURRENT_SUBLEVEL"
 
-      # ============================================================
-      # 5. CONFIGURE KERNEL (oppo6771_18601_defconfig)
-      # ============================================================
-      - name: Configure Kernel (oppo6771_18601_defconfig)
+          if [ "$CURRENT_SUBLEVEL" = "186" ]; then
+            echo "Kernel is already 4.14.186"
+            exit 0
+          fi
+
+          if [ "$CURRENT_SUBLEVEL" != "146" ]; then
+            echo "Expected 4.14.146 source."
+            echo "Found:"
+            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
+            exit 1
+          fi
+
+          wget -q \
+            https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
+
+          unxz patch-4.14.186.xz
+
+          patch -p1 \
+            --forward \
+            --exclude=Makefile \
+            < patch-4.14.186
+
+          sed -i \
+            's/^SUBLEVEL = 146$/SUBLEVEL = 186/' \
+            Makefile
+
+          echo ""
+          echo "Final kernel version:"
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
+
+      # ----------------------------------------------------------
+      # 7. Find defconfig
+      # ----------------------------------------------------------
+      - name: Verify Defconfig
         shell: bash
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export PYTHON=python2.7
+          set -e
+
+          CONFIG="arch/arm64/configs/oppo6771_18601_defconfig"
+
+          if [ ! -f "$CONFIG" ]; then
+            echo "ERROR: $CONFIG not found!"
+            echo ""
+            echo "Available oppo/6771 configs:"
+            find arch/arm64/configs -type f \
+              \( -iname '*oppo*' -o -iname '*6771*' \) \
+              | sort
+
+            exit 1
+          fi
+
+          echo "Found:"
+          ls -lh "$CONFIG"
+
+      # ----------------------------------------------------------
+      # 8. Configure
+      # ----------------------------------------------------------
+      - name: Configure Kernel
+        shell: bash
+        env:
+          ARCH: arm64
+          SUBARCH: arm64
+        run: |
+          set -o pipefail
+
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
-
-          # REMOVE PROBLEMATIC TOUCHSCREEN FOLDER BEFORE CONFIGURATION
-          rm -rf drivers/input/touchscreen/mediatek/hq
 
           rm -rf out
+          mkdir -p out
+
+          echo "=========================================="
+          echo "Running defconfig"
+          echo "=========================================="
 
           make O=out \
-            ARCH="$ARCH" \
+            ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            oppo6771_18601_defconfig
+            oppo6771_18601_defconfig \
+            2>&1 | tee defconfig.log
 
-      # ============================================================
-      # 6. COMPILE KERNEL
-      # ============================================================
-      - name: Compile Kernel
+          echo ""
+          echo "=========================================="
+          echo "Checking generated config"
+          echo "=========================================="
+
+          test -f out/.config
+
+          echo "CONFIG generated successfully"
+
+          cp out/.config config-used
+
+      # ----------------------------------------------------------
+      # 9. Kernel compatibility fixes
+      # ----------------------------------------------------------
+      - name: Apply Kernel Build Fixes
         shell: bash
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export PYTHON=python2.7
+          set -e
+
+          echo "Applying compatibility fixes..."
+
+          # Old DTC lexer
+          if [ -f scripts/dtc/dtc-lexer.lex.c_shipped ]; then
+            sed -i \
+              's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' \
+              scripts/dtc/dtc-lexer.lex.c_shipped
+          fi
+
+          # Old host compiler compatibility
+          export KCFLAGS="-Wno-error"
+          export HOSTCFLAGS="-fcommon"
+          export HOSTCXXFLAGS="-fcommon"
+
+          # Disable problematic OPPO fingerprint driver
+          if grep -q '^CONFIG_OPPO_FINGERPRINT=y' out/.config; then
+            sed -i \
+              's/^CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/' \
+              out/.config
+          fi
+
+          echo "Fixes applied"
+
+      # ----------------------------------------------------------
+      # 10. Build kernel
+      # ----------------------------------------------------------
+      - name: Build Kernel
+        shell: bash
+        env:
+          ARCH: arm64
+          SUBARCH: arm64
+          KCFLAGS: -Wno-error
+          HOSTCFLAGS: -fcommon
+          HOSTCXXFLAGS: -fcommon
+        run: |
+          set -o pipefail
+
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-"
           export CROSS_COMPILE_ARM32="$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-"
 
-          # MediaTek DTS Python Syntax Fix
-          find . -name "DtsGen.py" -exec sed -i 's/print "\(.*\)"/print("\1")/g' {} +
-          find . -name "DtsGen.py" -exec sed -i 's/print ""/print()/g' {} +
-          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+          echo "=========================================="
+          echo "BUILDING KERNEL"
+          echo "=========================================="
 
-          # Fix 'multiple definition of yylloc'
-          if [ -f "scripts/dtc/dtc-lexer.lex.c_shipped" ]; then
-            sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped
-          fi
-
-          # Fix Qualcomm SMEM header issue
-          find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
-          find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
-
-          # DISABLE OPPO FINGERPRINT DRIVER
-          sed -i 's/CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/g' out/.config
-          sed -i 's/obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//# obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//g' drivers/input/Makefile
-
-          # CLEANLY WIPE fbconfig_kdebug.c TO AVOID MULTIPLE DEFINITIONS
-          FB_DEBUG_FILE="drivers/misc/mediatek/video/mt6771/videox/fbconfig_kdebug.c"
-          if [ -f "$FB_DEBUG_FILE" ]; then
-            > "$FB_DEBUG_FILE"
-          fi
-
-          # Compile Kernel with all warnings/errors ignored
           make -j"$(nproc)" \
             O=out \
-            ARCH="$ARCH" \
+            ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            PYTHON="$PYTHON" \
-            KCFLAGS="-Wno-error -Wno-format -Wno-format-security -Wno-error=strict-prototypes -Wno-strict-prototypes -Wno-error=comment -Wno-comment" \
-            HOSTCFLAGS="-fcommon" \
-            HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
-              echo "========================================="
-              echo "  EXACT BUILD ERROR FOUND BELOW:"
-              echo "========================================="
-              grep -C 5 -i "error:" build.log | tail -n 40
-              exit 1
-            }
+            KCFLAGS="$KCFLAGS" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            HOSTCXXFLAGS="$HOSTCXXFLAGS" \
+            2>&1 | tee build.log
 
-      # ============================================================
-      # 7. FORCE MERGE DTB
-      # ============================================================
-      - name: Generate Safe Image.gz-dtb
+      # ----------------------------------------------------------
+      # 11. Check output
+      # ----------------------------------------------------------
+      - name: Check Kernel Output
         shell: bash
         run: |
-          echo "========================================"
-          echo "CHECKING KERNEL IMAGE AND DTB"
-          echo "========================================"
+          set -e
 
-          DTB_FILE=$(find out/arch/arm64/boot/dts/ -name "*.dtb" | head -n 1)
+          echo "Kernel output:"
+          find out/arch/arm64/boot \
+            -maxdepth 3 \
+            -type f \
+            | sort
 
-          if [ -f "out/arch/arm64/boot/Image.gz" ] && [ -n "$DTB_FILE" ]; then
-            echo "Merging Image.gz with DTB: $DTB_FILE"
-            cat out/arch/arm64/boot/Image.gz $DTB_FILE > out/arch/arm64/boot/Image.gz-dtb
-            echo "SUCCESS: Image.gz-dtb created!"
+          if [ ! -f out/arch/arm64/boot/Image.gz ]; then
+            echo "ERROR: Image.gz not generated"
+            exit 1
           fi
 
-      # ============================================================
-      # 8. COLLECT & ZIP ARTIFACTS
-      # ============================================================
-      - name: Package Output
+          echo "Image.gz generated successfully"
+
+      # ----------------------------------------------------------
+      # 12. Generate Image.gz-dtb
+      # ----------------------------------------------------------
+      - name: Generate Image.gz-dtb
         shell: bash
         run: |
+          set -e
+
+          DTB=$(find out/arch/arm64/boot/dts \
+            -type f \
+            -name '*.dtb' \
+            | head -n 1)
+
+          if [ -z "$DTB" ]; then
+            echo "No DTB found"
+            exit 1
+          fi
+
+          echo "Using DTB:"
+          echo "$DTB"
+
+          cat \
+            out/arch/arm64/boot/Image.gz \
+            "$DTB" \
+            > out/arch/arm64/boot/Image.gz-dtb
+
+          ls -lh out/arch/arm64/boot/Image.gz*
+          
+      # ----------------------------------------------------------
+      # 13. Package
+      # ----------------------------------------------------------
+      - name: Package Kernel
+        shell: bash
+        run: |
+          set -e
+
           rm -rf kernel-output
           mkdir -p kernel-output
 
-          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb kernel-output/
-          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            cp out/arch/arm64/boot/Image.gz kernel-output/
-          fi
+          cp out/arch/arm64/boot/Image.gz-dtb \
+            kernel-output/
 
-          cp build.log kernel-output/ || true
+          cp out/arch/arm64/boot/Image.gz \
+            kernel-output/
+
+          cp out/.config \
+            kernel-output/config
+
+          cp defconfig.log \
+            kernel-output/
+
+          cp build.log \
+            kernel-output/
 
           cd kernel-output
-          zip -9 -r ../Realme3i-Kernel-4.14.186.zip .
 
-      # ============================================================
-      # 9. UPLOAD TO GITHUB ACTIONS
-      # ============================================================
-      - name: Upload Kernel Zip
+          zip -9 -r \
+            ../Realme3i-Kernel-4.14.186.zip \
+            .
+
+      # ----------------------------------------------------------
+      # 14. Upload artifact
+      # ----------------------------------------------------------
+      - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
           name: Realme3i-Kernel-4.14.186
           path: Realme3i-Kernel-4.14.186.zip
+          if-no-files-found: error
