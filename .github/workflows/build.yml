@@ -31,7 +31,7 @@ jobs:
           sudo apt-get install -y \
             bc bison build-essential flex libssl-dev libncurses5-dev \
             libncurses-dev libelf-dev libgnutls28-dev clang lld llvm \
-            git zip unzip cpio rsync python2.7 python2.7-minimal xz-utils patch
+            git zip unzip cpio rsync python2.7 python2.7-minimal xz-utils patch python3
 
           sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python2
 
@@ -118,11 +118,22 @@ jobs:
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
-          # Fix OPPO Fingerprint Empty Macro Error (Recursively across drivers/input/oppo_fp_drivers)
-          if [ -d "drivers/input/oppo_fp_drivers" ]; then
-            find drivers/input/oppo_fp_drivers/ -type f -name "*.c" -exec sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' {} +
-            find drivers/input/oppo_fp_drivers/ -type f -name "*.h" -exec sed -i '1s/^/#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n/' {} +
-          fi
+          # Robust OPPO Fingerprint Macro Fix via Python
+          python3 -c '
+          import os
+          target_dir = "drivers/input/oppo_fp_drivers"
+          patch = "#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 0\n#endif\n"
+          if os.path.exists(target_dir):
+              for root, _, files in os.walk(target_dir):
+                  for file in files:
+                      if file.endswith((".c", ".h")):
+                          filepath = os.path.join(root, file)
+                          with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                              content = f.read()
+                          if "CONFIG_OPPO_FINGERPRINT_PROJECT" in content and "#define CONFIG_OPPO_FINGERPRINT_PROJECT" not in content:
+                              with open(filepath, "w", encoding="utf-8") as f:
+                                  f.write(patch + content)
+          '
 
           make -j"$(nproc)" \
             O=out \
@@ -130,6 +141,7 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
+            KCFLAGS="-DCONFIG_OPPO_FINGERPRINT_PROJECT=0" \
             HOSTCFLAGS="-fcommon" \
             HOSTCXXFLAGS="-fcommon" \
             2>&1 | tee build.log
@@ -176,7 +188,7 @@ jobs:
       # 9. UPLOAD TO GITHUB ACTIONS
       # ============================================================
       - name: Upload Kernel Zip
-        uses: actions/upload-artifact@v4
+        uses: assets/upload-artifact@v4
         with:
           name: Realme3i-Kernel-4.14.186
           path: Realme3i-Kernel-4.14.186.zip
