@@ -118,35 +118,17 @@ jobs:
           find drivers/ -type f -name "*.c" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
           find drivers/ -type f -name "*.h" -exec sed -i 's/#include <soc\/qcom\/smem\.h>/\/\/ #include <soc\/qcom\/smem\.h>/g' {} +
 
-          # ABSOLUTE FIX FOR OPPO FINGERPRINT MACRO ERROR
-          python3 -c '
-          import os
+          # DISABLE OPPO FINGERPRINT DRIVER COMPLETELY
+          sed -i 's/CONFIG_OPPO_FINGERPRINT=y/# CONFIG_OPPO_FINGERPRINT is not set/g' out/.config
+          sed -i 's/obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//# obj-\$(CONFIG_OPPO_FINGERPRINT) += oppo_fp_drivers\//g' drivers/input/Makefile
 
-          target_dir = "drivers/input/oppo_fp_drivers"
-          if os.path.exists(target_dir):
-              for root, _, files in os.walk(target_dir):
-                  for file in files:
-                      if file.endswith((".c", ".h")):
-                          filepath = os.path.join(root, file)
-                          with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                              content = f.read()
-                          
-                          # Force define at the top and replace empty macro references
-                          new_content = "#ifndef CONFIG_OPPO_FINGERPRINT_PROJECT\n#define CONFIG_OPPO_FINGERPRINT_PROJECT 18601\n#endif\n" + content
-                          new_content = new_content.replace("CONFIG_OPPO_FINGERPRINT_PROJECT ==", "18601 ==")
-                          
-                          with open(filepath, "w", encoding="utf-8") as f:
-                              f.write(new_content)
-          '
-
-          # Compile and trap exact error on failure
+          # Compile Kernel
           make -j"$(nproc)" \
             O=out \
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             PYTHON="$PYTHON" \
-            KCFLAGS="-DCONFIG_OPPO_FINGERPRINT_PROJECT=18601" \
             HOSTCFLAGS="-fcommon" \
             HOSTCXXFLAGS="-fcommon" 2>&1 | tee build.log || {
               echo "========================================="
