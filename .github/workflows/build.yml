@@ -73,6 +73,28 @@ jobs:
 
 
       # ============================================================
+      # UPSTREAM KERNEL TO 4.14.186
+      # ============================================================
+
+      - name: Upstream Patch to 4.14.186
+        shell: bash
+        run: |
+          echo "============================================"
+          echo "UPGRADING KERNEL VERSION TO 4.14.186"
+          echo "============================================"
+
+          wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
+          xz -d patch-4.14.186.xz
+
+          patch -p1 --forward --reject-file=- --exclude="Makefile" < patch-4.14.186 || true
+
+          sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
+
+          echo "Kernel Source version upgraded!"
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
+
+
+      # ============================================================
       # GCC 4.9 AARCH64
       # ============================================================
 
