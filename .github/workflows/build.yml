@@ -10,17 +10,17 @@ jobs:
 
     steps:
 
-      # ---------------------------------------------------------
-      # Checkout
-      # ---------------------------------------------------------
+      # =========================================================
+      # CHECKOUT
+      # =========================================================
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ---------------------------------------------------------
-      # Dependencies
-      # ---------------------------------------------------------
+      # =========================================================
+      # DEPENDENCIES
+      # =========================================================
       - name: Install Dependencies
         shell: bash
         run: |
@@ -47,43 +47,136 @@ jobs:
             python3 \
             python3-lib2to3 \
             python3-distutils \
-            file
+            file \
+            pahole
 
+          echo "Python:"
           python3 --version
-          gcc --version
 
-      # ---------------------------------------------------------
-      # Upgrade Kernel 4.14.146 -> 4.14.186
-      # ---------------------------------------------------------
-      - name: Upstream Patch to 4.14.186
+          echo "2to3 module:"
+          python3 -m lib2to3 --help >/dev/null
+
+      # =========================================================
+      # CHECK ORIGINAL KERNEL VERSION
+      # =========================================================
+      - name: Check Original Kernel Version
         shell: bash
         run: |
           set -e
 
-          wget -O patch-4.14.186.xz \
-            https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
+          echo "=========================================="
+          echo "Original Kernel Version"
+          echo "=========================================="
 
-          xz -d -f patch-4.14.186.xz
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile
 
-          echo "Applying Linux 4.14.186 patch..."
+          VERSION=$(awk '/^VERSION =/ {print $3}' Makefile)
+          PATCHLEVEL=$(awk '/^PATCHLEVEL =/ {print $3}' Makefile)
+          SUBLEVEL=$(awk '/^SUBLEVEL =/ {print $3}' Makefile)
 
-          patch \
-            -p1 \
-            --forward \
-            --reject-file=- \
-            --exclude="Makefile" \
-            < patch-4.14.186 || true
+          echo "Detected: ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
-          # Keep vendor kernel Makefile version consistent.
-          if grep -q "SUBLEVEL = 146" Makefile; then
-            sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
+          if [ "$VERSION" != "4" ] || [ "$PATCHLEVEL" != "14" ]; then
+            echo "ERROR: This workflow expects Linux 4.14.x source."
+            exit 1
           fi
 
-          grep -E 'VERSION|PATCHLEVEL|SUBLEVEL' Makefile | head -n 5
+          if [ "$SUBLEVEL" != "146" ]; then
+            echo "ERROR: Expected starting source 4.14.146"
+            echo "Found: 4.14.${SUBLEVEL}"
+            exit 1
+          fi
 
-      # ---------------------------------------------------------
-      # AArch64 GCC 4.9
-      # ---------------------------------------------------------
+          echo "Starting source confirmed: Linux 4.14.146"
+
+      # =========================================================
+      # UPGRADE 4.14.146 -> 4.14.186
+      # =========================================================
+      - name: Upgrade Kernel to 4.14.186
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Linux 4.14.146 -> 4.14.186"
+          echo "=========================================="
+
+          for VERSION in $(seq 147 186); do
+
+            PREV=$((VERSION - 1))
+
+            PATCH_URL="https://cdn.kernel.org/pub/linux/kernel/v4.x/incr/patch-4.14.${PREV}-${VERSION}.xz"
+            PATCH_FILE="patch-4.14.${PREV}-${VERSION}.xz"
+
+            echo ""
+            echo "------------------------------------------"
+            echo "Applying 4.14.${PREV} -> 4.14.${VERSION}"
+            echo "------------------------------------------"
+
+            wget \
+              --retry-connrefused \
+              --tries=5 \
+              --timeout=30 \
+              -O "$PATCH_FILE" \
+              "$PATCH_URL"
+
+            test -s "$PATCH_FILE"
+
+            echo "Applying patch..."
+
+            xz -dc "$PATCH_FILE" | patch -p1 --forward
+
+            rm -f "$PATCH_FILE"
+
+            # Make sure the Makefile reports the expected sublevel.
+            CURRENT=$(awk '/^SUBLEVEL =/ {print $3}' Makefile)
+
+            if [ "$CURRENT" != "$VERSION" ]; then
+              echo "Adjusting Makefile SUBLEVEL:"
+              echo "Current: $CURRENT"
+              echo "Target : $VERSION"
+
+              sed -i \
+                "s/^SUBLEVEL = .*/SUBLEVEL = ${VERSION}/" \
+                Makefile
+            fi
+
+            CURRENT=$(awk '/^SUBLEVEL =/ {print $3}' Makefile)
+
+            if [ "$CURRENT" != "$VERSION" ]; then
+              echo "ERROR: Could not reach 4.14.${VERSION}"
+              exit 1
+            fi
+
+            echo "Successfully reached 4.14.${VERSION}"
+
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "FINAL SOURCE VERSION"
+          echo "=========================================="
+
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile
+
+          FINAL_VERSION=$(awk '/^VERSION =/ {print $3}' Makefile)
+          FINAL_PATCHLEVEL=$(awk '/^PATCHLEVEL =/ {print $3}' Makefile)
+          FINAL_SUBLEVEL=$(awk '/^SUBLEVEL =/ {print $3}' Makefile)
+
+          FINAL="${FINAL_VERSION}.${FINAL_PATCHLEVEL}.${FINAL_SUBLEVEL}"
+
+          echo "Final kernel source: $FINAL"
+
+          if [ "$FINAL" != "4.14.186" ]; then
+            echo "ERROR: Final kernel is not 4.14.186!"
+            exit 1
+          fi
+
+          echo "SUCCESS: Linux 4.14.186"
+
+      # =========================================================
+      # AARCH64 GCC 4.9
+      # =========================================================
       - name: Download AArch64 GCC 4.9
         shell: bash
         run: |
@@ -97,14 +190,15 @@ jobs:
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             "$GITHUB_WORKSPACE/toolchains/gcc64"
 
-          test -x "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
+          test -x \
+            "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
 
           "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc" \
             --version | head -n 1
 
-      # ---------------------------------------------------------
+      # =========================================================
       # ARM32 GCC 4.9
-      # ---------------------------------------------------------
+      # =========================================================
       - name: Download ARM32 GCC 4.9
         shell: bash
         run: |
@@ -116,20 +210,22 @@ jobs:
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
             "$GITHUB_WORKSPACE/toolchains/gcc32"
 
-          test -x "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
+          test -x \
+            "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
 
           "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc" \
             --version | head -n 1
 
-      # ---------------------------------------------------------
-      # Toolchain + Python 2 -> Python 3 conversion
-      # ---------------------------------------------------------
+      # =========================================================
+      # TOOLCHAIN + PYTHON
+      # =========================================================
       - name: Setup Toolchain & Python
         shell: bash
         run: |
           set -e
 
           echo "CROSS_COMPILE=$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
+
           echo "CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-" >> "$GITHUB_ENV"
 
           echo "ARCH=arm64" >> "$GITHUB_ENV"
@@ -139,57 +235,50 @@ jobs:
           echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
 
-          echo "========================================"
-          echo "Python version"
-          echo "========================================"
+          echo "=========================================="
+          echo "Python"
+          echo "=========================================="
 
           python3 --version
-          2to3 --help >/dev/null
 
-          echo "========================================"
-          echo "Converting old Python kernel scripts"
-          echo "========================================"
-
-          # The MTK 4.14 vendor kernel contains Python 2 scripts.
-          # Convert them to Python 3 before the build.
-
+          # Convert old MediaTek Python 2 scripts.
           if [ -f scripts/drvgen.py ]; then
-            echo "Converting scripts/drvgen.py"
-            2to3 -w -n scripts/drvgen.py
+            echo "Converting scripts/drvgen.py..."
+
+            python3 -m lib2to3 \
+              -w \
+              -n \
+              scripts/drvgen.py
           fi
 
+          # Convert Python files used by drvgen.
           if [ -d scripts/drvgen ]; then
             find scripts/drvgen \
               -type f \
               -name "*.py" \
               -print0 |
             while IFS= read -r -d '' file; do
-              echo "Converting $file"
-              2to3 -w -n "$file" || true
+              echo "Converting: $file"
+
+              python3 -m lib2to3 \
+                -w \
+                -n \
+                "$file" \
+                || true
             done
           fi
 
-          # Convert all Python scripts in scripts/.
-          find scripts \
-            -type f \
-            -name "*.py" \
-            -print0 |
-          while IFS= read -r -d '' file; do
-            echo "Checking $file"
-            2to3 -w -n "$file" || true
-          done
+          echo "Python conversion complete."
 
-          echo "Python conversion completed."
-
-      # ---------------------------------------------------------
-      # Find Device Defconfig
-      # ---------------------------------------------------------
+      # =========================================================
+      # FIND DEFCONFIG
+      # =========================================================
       - name: Find Defconfig
         shell: bash
         run: |
           set -e
 
-          echo "Searching for Realme 3i / OPPO 6771 defconfig..."
+          echo "Searching defconfig..."
 
           find arch/arm64/configs \
             -type f \
@@ -203,18 +292,19 @@ jobs:
             -print \
             | sort
 
-          echo ""
-          echo "Checking requested defconfig..."
-
-          if [ -f "arch/arm64/configs/oppo6771_18601_defconfig" ]; then
-            echo "Found oppo6771_18601_defconfig"
-          else
-            echo "WARNING: oppo6771_18601_defconfig was not found."
+          if [ ! -f "arch/arm64/configs/oppo6771_18601_defconfig" ]; then
+            echo ""
+            echo "ERROR: oppo6771_18601_defconfig not found!"
+            exit 1
           fi
 
-      # ---------------------------------------------------------
-      # Prepare Output Directory
-      # ---------------------------------------------------------
+          echo ""
+          echo "Found:"
+          echo "arch/arm64/configs/oppo6771_18601_defconfig"
+
+      # =========================================================
+      # PREPARE BUILD DIRECTORY
+      # =========================================================
       - name: Prepare Build Directory
         shell: bash
         run: |
@@ -223,13 +313,9 @@ jobs:
           rm -rf out
           mkdir -p out
 
-          echo "Build directory:"
-          pwd
-          ls -la
-
-      # ---------------------------------------------------------
-      # Configure Kernel
-      # ---------------------------------------------------------
+      # =========================================================
+      # CONFIGURE KERNEL
+      # =========================================================
       - name: Configure Kernel
         shell: bash
         run: |
@@ -237,13 +323,12 @@ jobs:
 
           TOUCH_MAKEFILE="drivers/input/touchscreen/mediatek/Makefile"
 
-          # Remove problematic HQ entry if present.
           if [ -f "$TOUCH_MAKEFILE" ]; then
             echo "Cleaning touchscreen Makefile..."
+
             sed -i '/hq/d' "$TOUCH_MAKEFILE" || true
           fi
 
-          # Remove -Werror from Makefiles/Kbuild files.
           echo "Removing -Werror..."
 
           find . \
@@ -265,17 +350,39 @@ jobs:
             oppo6771_18601_defconfig \
             2>&1 | tee defconfig.log
 
-      # ---------------------------------------------------------
-      # Build Kernel
-      # ---------------------------------------------------------
+          echo ""
+          echo "Defconfig completed."
+
+      # =========================================================
+      # VERIFY CONFIG
+      # =========================================================
+      - name: Verify Kernel Configuration
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f out/.config ]; then
+            echo "ERROR: out/.config not generated!"
+            exit 1
+          fi
+
+          echo "Kernel configuration generated successfully."
+
+          echo ""
+          echo "Kernel version from config:"
+          grep '^CONFIG_LOCALVERSION=' out/.config || true
+
+      # =========================================================
+      # BUILD KERNEL
+      # =========================================================
       - name: Build Kernel
         shell: bash
         run: |
           set -o pipefail
 
-          echo "========================================"
-          echo "Starting kernel build"
-          echo "========================================"
+          echo "=========================================="
+          echo "BUILDING LINUX 4.14.186"
+          echo "=========================================="
 
           make \
             -j"$(nproc)" \
@@ -288,29 +395,44 @@ jobs:
             KCFLAGS="$KCFLAGS" \
             2>&1 | tee build.log
 
-          echo "========================================"
-          echo "Kernel build completed"
-          echo "========================================"
+          echo ""
+          echo "Kernel build completed."
 
-      # ---------------------------------------------------------
-      # Generate Image.gz-dtb
-      # ---------------------------------------------------------
-      - name: Generate Image.gz-dtb
+      # =========================================================
+      # VERIFY KERNEL IMAGE
+      # =========================================================
+      - name: Verify Kernel Image
         shell: bash
         run: |
           set -e
 
           IMAGE="out/arch/arm64/boot/Image.gz"
-          DTB_DIR="out/arch/arm64/boot/dts"
-
-          echo "Checking Image.gz..."
 
           if [ ! -f "$IMAGE" ]; then
             echo "ERROR: Image.gz not found!"
             exit 1
           fi
 
-          echo "Searching DTB..."
+          echo "Image.gz found:"
+          ls -lh "$IMAGE"
+
+      # =========================================================
+      # FIND DTB
+      # =========================================================
+      - name: Find Device Tree
+        shell: bash
+        run: |
+          set -e
+
+          DTB_DIR="out/arch/arm64/boot/dts"
+
+          echo "Searching DTB files..."
+
+          find "$DTB_DIR" \
+            -type f \
+            -name "*.dtb" \
+            -print \
+            | sort
 
           DTB=$(find "$DTB_DIR" \
             -type f \
@@ -318,25 +440,64 @@ jobs:
             | head -n 1)
 
           if [ -z "$DTB" ]; then
+            echo ""
             echo "ERROR: No DTB found!"
-            find "$DTB_DIR" -type f | head -n 50
             exit 1
           fi
 
-          echo "Image: $IMAGE"
-          echo "DTB:   $DTB"
+          echo ""
+          echo "Selected DTB:"
+          echo "$DTB"
 
-          cat "$IMAGE" "$DTB" \
-            > out/arch/arm64/boot/Image.gz-dtb
+          echo "DTB_PATH=$DTB" >> "$GITHUB_ENV"
 
+      # =========================================================
+      # GENERATE IMAGE.GZ-DTB
+      # =========================================================
+      - name: Generate Image.gz-dtb
+        shell: bash
+        run: |
+          set -e
+
+          IMAGE="out/arch/arm64/boot/Image.gz"
+          DTB="$DTB_PATH"
+          OUTPUT="out/arch/arm64/boot/Image.gz-dtb"
+
+          echo "=========================================="
+          echo "Generating Image.gz-dtb"
+          echo "=========================================="
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "ERROR: Image.gz missing!"
+            exit 1
+          fi
+
+          if [ ! -f "$DTB" ]; then
+            echo "ERROR: DTB missing!"
+            exit 1
+          fi
+
+          echo "Image : $IMAGE"
+          echo "DTB   : $DTB"
+          echo "Output: $OUTPUT"
+
+          cat "$IMAGE" "$DTB" > "$OUTPUT"
+
+          if [ ! -s "$OUTPUT" ]; then
+            echo "ERROR: Image.gz-dtb is empty!"
+            exit 1
+          fi
+
+          echo ""
+          echo "Generated successfully:"
           ls -lh \
             "$IMAGE" \
             "$DTB" \
-            out/arch/arm64/boot/Image.gz-dtb
+            "$OUTPUT"
 
-      # ---------------------------------------------------------
-      # Package Kernel
-      # ---------------------------------------------------------
+      # =========================================================
+      # PACKAGE
+      # =========================================================
       - name: Package Kernel
         shell: bash
         run: |
@@ -345,23 +506,33 @@ jobs:
           rm -rf kernel-output
           mkdir -p kernel-output
 
+          # Kernel image
           cp \
             out/arch/arm64/boot/Image.gz \
             kernel-output/
 
+          # Combined image + DTB
           cp \
             out/arch/arm64/boot/Image.gz-dtb \
             kernel-output/
 
-          # Include DTB separately as well.
-          DTB=$(find out/arch/arm64/boot/dts \
-            -type f \
-            -name "*.dtb" \
-            | head -n 1)
+          # Copy selected DTB separately
+          cp \
+            "$DTB_PATH" \
+            kernel-output/
 
-          if [ -n "$DTB" ]; then
-            cp "$DTB" kernel-output/
-          fi
+          # Add build information
+          echo "Linux Kernel: 4.14.186" \
+            > kernel-output/kernel-version.txt
+
+          echo "Device: Realme 3i / MT6771" \
+            >> kernel-output/kernel-version.txt
+
+          echo "Architecture: arm64" \
+            >> kernel-output/kernel-version.txt
+
+          echo "Toolchain: Android GCC 4.9" \
+            >> kernel-output/kernel-version.txt
 
           cd kernel-output
 
@@ -371,31 +542,56 @@ jobs:
 
           cd ..
 
-          echo "========================================"
-          echo "Kernel package created"
-          echo "========================================"
+          echo ""
+          echo "=========================================="
+          echo "PACKAGE CREATED"
+          echo "=========================================="
 
           ls -lh Realme3-Kernel.zip
+
+          echo ""
+          echo "Package contents:"
           unzip -l Realme3-Kernel.zip
 
-      # ---------------------------------------------------------
-      # Upload Artifact
-      # ---------------------------------------------------------
+      # =========================================================
+      # VERIFY FINAL KERNEL VERSION
+      # =========================================================
+      - name: Verify Final Kernel Version
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "FINAL VERSION CHECK"
+          echo "=========================================="
+
+          make -s \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            kernelversion
+
+          echo ""
+          echo "Expected: 4.14.186"
+
+      # =========================================================
+      # UPLOAD KERNEL
+      # =========================================================
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Realme3-Kernel
+          name: Realme3-Kernel-4.14.186
           path: Realme3-Kernel.zip
           if-no-files-found: error
 
-      # ---------------------------------------------------------
-      # Upload Build Logs if build fails
-      # ---------------------------------------------------------
+      # =========================================================
+      # UPLOAD LOGS IF FAILED
+      # =========================================================
       - name: Upload Build Logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Realme3-Kernel-Logs
+          name: Realme3-Kernel-Build-Logs
           path: |
             defconfig.log
             build.log
