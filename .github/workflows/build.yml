@@ -58,25 +58,33 @@ jobs:
           rm -rf out
           mkdir -p out
 
-      - name: Ultimate Fix for dtvgen.py (Pre-Build)
+      - name: Exact Fix for dtvgen.py
         shell: bash
         run: |
-          TARGET="tools/dtb/dtvgen.py"
-          if [ -f "$TARGET" ]; then
+          PYTHON_FILE="tools/dtb/dtvgen.py"
+          if [ -f "$PYTHON_FILE" ]; then
             python3 -c '
             path = "tools/dtb/dtvgen.py"
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+                lines = f.readlines()
             
-            # Simple regex or string replacement for python2 print in dtvgen.py
-            import re
-            # Replaces print "text" or print x with print(text) or print(x)
-            fixed_content = re.sub(r"\bprint\s+([^\(\n]+)", r"print(\1)", content)
-            
+            fixed = []
+            for line in lines:
+                stripped = line.lstrip()
+                # If line starts with print (with space) but no opening parenthesis
+                if stripped.startswith("print ") and "(" not in stripped[:7]:
+                    indent = line[:len(line) - len(stripped)]
+                    content = stripped[6:].rstrip("\r\n")
+                    fixed.append(f"{indent}print({content})\n")
+                else:
+                    fixed.append(line)
+                    
             with open(path, "w", encoding="utf-8") as f:
-                f.write(fixed_content)
-            print("Successfully fixed dtvgen.py print statements via python regex.")
+                f.writelines(fixed)
+            print("Successfully patched print statements in tools/dtb/dtvgen.py")
             '
+          else
+            echo "Warning: tools/dtb/dtvgen.py not found directly!"
           fi
 
       - name: Configure Kernel
