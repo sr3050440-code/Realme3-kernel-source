@@ -39,7 +39,7 @@ jobs:
           set -e
           git clone --depth=1 --branch android10-release https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 "$GITHUB_WORKSPACE/toolchains/gcc32"
 
-      - name: Setup Toolchain
+      - name: Setup Toolchain & Python Wrapper
         run: |
           echo "CROSS_COMPILE=$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
           echo "CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-" >> "$GITHUB_ENV"
@@ -49,6 +49,29 @@ jobs:
           echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
 
+          # Create a smart python wrapper that auto-fixes print syntax on any executed script
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          cat << 'EOF' > "$GITHUB_WORKSPACE/bin/python"
+          #!/usr/bin/env python3
+          import sys, re, os
+
+          if len(sys.argv) > 1 and sys.argv[1].endswith('.py'):
+              script_path = sys.argv[1]
+              try:
+                  with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
+                      content = f.read()
+                  fixed = re.sub(r'\bprint\s+([^\(\n]+)', r'print(\1)', content)
+                  if fixed != content:
+                      with open(script_path, 'w', encoding='utf-8') as f:
+                          f.write(fixed)
+              except Exception:
+                  pass
+
+          os.execvp('python3', ['python3'] + sys.argv[1:])
+          EOF
+          chmod +x "$GITHUB_WORKSPACE/bin/python"
+          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
       - name: Find Defconfig
         run: |
           find arch/arm64/configs -type f \( -iname '*oppo*' -o -iname '*6771*' -o -iname '*18601*' \) | sort
@@ -57,35 +80,6 @@ jobs:
         run: |
           rm -rf out
           mkdir -p out
-
-      - name: Exact Fix for dtvgen.py
-        shell: bash
-        run: |
-          PYTHON_FILE="tools/dtb/dtvgen.py"
-          if [ -f "$PYTHON_FILE" ]; then
-            python3 -c '
-            path = "tools/dtb/dtvgen.py"
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
-            
-            fixed = []
-            for line in lines:
-                stripped = line.lstrip()
-                # If line starts with print (with space) but no opening parenthesis
-                if stripped.startswith("print ") and "(" not in stripped[:7]:
-                    indent = line[:len(line) - len(stripped)]
-                    content = stripped[6:].rstrip("\r\n")
-                    fixed.append(f"{indent}print({content})\n")
-                else:
-                    fixed.append(line)
-                    
-            with open(path, "w", encoding="utf-8") as f:
-                f.writelines(fixed)
-            print("Successfully patched print statements in tools/dtb/dtvgen.py")
-            '
-          else
-            echo "Warning: tools/dtb/dtvgen.py not found directly!"
-          fi
 
       - name: Configure Kernel
         shell: bash
