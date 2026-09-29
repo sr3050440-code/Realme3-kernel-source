@@ -246,8 +246,11 @@ jobs:
           echo "CONFIGURING KERNEL"
           echo "=========================================="
 
-          # Remove problematic touchscreen folder to prevent Kconfig recursive dependency loop
-          rm -rf drivers/input/touchscreen/mediatek/hq
+          # Smart Fix: Remove 'hq' reference from Makefile so compiling ignores it safely
+          TOUCH_MAKEFILE="drivers/input/touchscreen/mediatek/Makefile"
+          if [ -f "$TOUCH_MAKEFILE" ]; then
+            sed -i '/hq/d' "$TOUCH_MAKEFILE" || true
+          fi
 
           # Disable -Werror globally in makefiles
           find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
