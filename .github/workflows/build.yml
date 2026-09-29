@@ -10,116 +10,393 @@ jobs:
 
     steps:
 
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # ---------------------------------------------------------
+      # Dependencies
+      # ---------------------------------------------------------
       - name: Install Dependencies
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev libncurses-dev libgnutls28-dev rsync unzip wget xz-utils zip python3 file
+          set -e
 
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            libncurses-dev \
+            libgnutls28-dev \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip \
+            python3 \
+            python3-lib2to3 \
+            python3-distutils \
+            file
+
+          python3 --version
+          gcc --version
+
+      # ---------------------------------------------------------
+      # Upgrade Kernel 4.14.146 -> 4.14.186
+      # ---------------------------------------------------------
       - name: Upstream Patch to 4.14.186
         shell: bash
         run: |
-          wget https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
-          xz -d patch-4.14.186.xz
-          patch -p1 --forward --reject-file=- --exclude="Makefile" < patch-4.14.186 || true
-          sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
+          set -e
 
+          wget -O patch-4.14.186.xz \
+            https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.14.186.xz
+
+          xz -d -f patch-4.14.186.xz
+
+          echo "Applying Linux 4.14.186 patch..."
+
+          patch \
+            -p1 \
+            --forward \
+            --reject-file=- \
+            --exclude="Makefile" \
+            < patch-4.14.186 || true
+
+          # Keep vendor kernel Makefile version consistent.
+          if grep -q "SUBLEVEL = 146" Makefile; then
+            sed -i 's/SUBLEVEL = 146/SUBLEVEL = 186/g' Makefile
+          fi
+
+          grep -E 'VERSION|PATCHLEVEL|SUBLEVEL' Makefile | head -n 5
+
+      # ---------------------------------------------------------
+      # AArch64 GCC 4.9
+      # ---------------------------------------------------------
       - name: Download AArch64 GCC 4.9
+        shell: bash
         run: |
           set -e
+
           mkdir -p "$GITHUB_WORKSPACE/toolchains"
-          git clone --depth=1 --branch android10-release https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 "$GITHUB_WORKSPACE/toolchains/gcc64"
 
+          git clone \
+            --depth=1 \
+            --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            "$GITHUB_WORKSPACE/toolchains/gcc64"
+
+          test -x "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc"
+
+          "$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-gcc" \
+            --version | head -n 1
+
+      # ---------------------------------------------------------
+      # ARM32 GCC 4.9
+      # ---------------------------------------------------------
       - name: Download ARM32 GCC 4.9
+        shell: bash
         run: |
           set -e
-          git clone --depth=1 --branch android10-release https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 "$GITHUB_WORKSPACE/toolchains/gcc32"
 
-      - name: Setup Toolchain & Python Wrapper
+          git clone \
+            --depth=1 \
+            --branch android10-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
+            "$GITHUB_WORKSPACE/toolchains/gcc32"
+
+          test -x "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc"
+
+          "$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-gcc" \
+            --version | head -n 1
+
+      # ---------------------------------------------------------
+      # Toolchain + Python 2 -> Python 3 conversion
+      # ---------------------------------------------------------
+      - name: Setup Toolchain & Python
+        shell: bash
         run: |
+          set -e
+
           echo "CROSS_COMPILE=$GITHUB_WORKSPACE/toolchains/gcc64/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
           echo "CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/toolchains/gcc32/bin/arm-linux-androideabi-" >> "$GITHUB_ENV"
+
           echo "ARCH=arm64" >> "$GITHUB_ENV"
           echo "SUBARCH=arm64" >> "$GITHUB_ENV"
+
           echo "HOSTCFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
 
-          # Create a smart python wrapper that auto-fixes print syntax on any executed script
-          mkdir -p "$GITHUB_WORKSPACE/bin"
-          cat << 'EOF' > "$GITHUB_WORKSPACE/bin/python"
-          #!/usr/bin/env python3
-          import sys, re, os
+          echo "========================================"
+          echo "Python version"
+          echo "========================================"
 
-          if len(sys.argv) > 1 and sys.argv[1].endswith('.py'):
-              script_path = sys.argv[1]
-              try:
-                  with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
-                      content = f.read()
-                  fixed = re.sub(r'\bprint\s+([^\(\n]+)', r'print(\1)', content)
-                  if fixed != content:
-                      with open(script_path, 'w', encoding='utf-8') as f:
-                          f.write(fixed)
-              except Exception:
-                  pass
+          python3 --version
+          2to3 --help >/dev/null
 
-          os.execvp('python3', ['python3'] + sys.argv[1:])
-          EOF
-          chmod +x "$GITHUB_WORKSPACE/bin/python"
-          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+          echo "========================================"
+          echo "Converting old Python kernel scripts"
+          echo "========================================"
 
+          # The MTK 4.14 vendor kernel contains Python 2 scripts.
+          # Convert them to Python 3 before the build.
+
+          if [ -f scripts/drvgen.py ]; then
+            echo "Converting scripts/drvgen.py"
+            2to3 -w -n scripts/drvgen.py
+          fi
+
+          if [ -d scripts/drvgen ]; then
+            find scripts/drvgen \
+              -type f \
+              -name "*.py" \
+              -print0 |
+            while IFS= read -r -d '' file; do
+              echo "Converting $file"
+              2to3 -w -n "$file" || true
+            done
+          fi
+
+          # Convert all Python scripts in scripts/.
+          find scripts \
+            -type f \
+            -name "*.py" \
+            -print0 |
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            2to3 -w -n "$file" || true
+          done
+
+          echo "Python conversion completed."
+
+      # ---------------------------------------------------------
+      # Find Device Defconfig
+      # ---------------------------------------------------------
       - name: Find Defconfig
+        shell: bash
         run: |
-          find arch/arm64/configs -type f \( -iname '*oppo*' -o -iname '*6771*' -o -iname '*18601*' \) | sort
+          set -e
 
+          echo "Searching for Realme 3i / OPPO 6771 defconfig..."
+
+          find arch/arm64/configs \
+            -type f \
+            \( \
+              -iname '*oppo*' \
+              -o \
+              -iname '*6771*' \
+              -o \
+              -iname '*18601*' \
+            \) \
+            -print \
+            | sort
+
+          echo ""
+          echo "Checking requested defconfig..."
+
+          if [ -f "arch/arm64/configs/oppo6771_18601_defconfig" ]; then
+            echo "Found oppo6771_18601_defconfig"
+          else
+            echo "WARNING: oppo6771_18601_defconfig was not found."
+          fi
+
+      # ---------------------------------------------------------
+      # Prepare Output Directory
+      # ---------------------------------------------------------
       - name: Prepare Build Directory
+        shell: bash
         run: |
+          set -e
+
           rm -rf out
           mkdir -p out
 
+          echo "Build directory:"
+          pwd
+          ls -la
+
+      # ---------------------------------------------------------
+      # Configure Kernel
+      # ---------------------------------------------------------
       - name: Configure Kernel
         shell: bash
         run: |
           set -o pipefail
+
           TOUCH_MAKEFILE="drivers/input/touchscreen/mediatek/Makefile"
+
+          # Remove problematic HQ entry if present.
           if [ -f "$TOUCH_MAKEFILE" ]; then
+            echo "Cleaning touchscreen Makefile..."
             sed -i '/hq/d' "$TOUCH_MAKEFILE" || true
           fi
-          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
-          make O=out ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" HOSTCFLAGS="$HOSTCFLAGS" HOSTCXXFLAGS="$HOSTCXXFLAGS" KCFLAGS="$KCFLAGS" oppo6771_18601_defconfig 2>&1 | tee defconfig.log
 
+          # Remove -Werror from Makefiles/Kbuild files.
+          echo "Removing -Werror..."
+
+          find . \
+            \( -name "Makefile" -o -name "Kbuild" \) \
+            -type f \
+            -exec sed -i 's/-Werror//g' {} + \
+            || true
+
+          echo "Running defconfig..."
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            HOSTCXXFLAGS="$HOSTCXXFLAGS" \
+            KCFLAGS="$KCFLAGS" \
+            oppo6771_18601_defconfig \
+            2>&1 | tee defconfig.log
+
+      # ---------------------------------------------------------
+      # Build Kernel
+      # ---------------------------------------------------------
       - name: Build Kernel
         shell: bash
         run: |
           set -o pipefail
-          make -j"$(nproc)" O=out ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" HOSTCFLAGS="$HOSTCFLAGS" HOSTCXXFLAGS="$HOSTCXXFLAGS" KCFLAGS="$KCFLAGS" 2>&1 | tee build.log
 
+          echo "========================================"
+          echo "Starting kernel build"
+          echo "========================================"
+
+          make \
+            -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            HOSTCXXFLAGS="$HOSTCXXFLAGS" \
+            KCFLAGS="$KCFLAGS" \
+            2>&1 | tee build.log
+
+          echo "========================================"
+          echo "Kernel build completed"
+          echo "========================================"
+
+      # ---------------------------------------------------------
+      # Generate Image.gz-dtb
+      # ---------------------------------------------------------
       - name: Generate Image.gz-dtb
         shell: bash
         run: |
           set -e
-          IMAGE="out/arch/arm64/boot/Image.gz"
-          DTB=$(find out/arch/arm64/boot/dts -type f -name '*.dtb' | head -n 1)
-          cat "$IMAGE" "$DTB" > out/arch/arm64/boot/Image.gz-dtb
 
+          IMAGE="out/arch/arm64/boot/Image.gz"
+          DTB_DIR="out/arch/arm64/boot/dts"
+
+          echo "Checking Image.gz..."
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "ERROR: Image.gz not found!"
+            exit 1
+          fi
+
+          echo "Searching DTB..."
+
+          DTB=$(find "$DTB_DIR" \
+            -type f \
+            -name "*.dtb" \
+            | head -n 1)
+
+          if [ -z "$DTB" ]; then
+            echo "ERROR: No DTB found!"
+            find "$DTB_DIR" -type f | head -n 50
+            exit 1
+          fi
+
+          echo "Image: $IMAGE"
+          echo "DTB:   $DTB"
+
+          cat "$IMAGE" "$DTB" \
+            > out/arch/arm64/boot/Image.gz-dtb
+
+          ls -lh \
+            "$IMAGE" \
+            "$DTB" \
+            out/arch/arm64/boot/Image.gz-dtb
+
+      # ---------------------------------------------------------
+      # Package Kernel
+      # ---------------------------------------------------------
       - name: Package Kernel
         shell: bash
         run: |
           set -e
+
           rm -rf kernel-output
           mkdir -p kernel-output
-          cp out/arch/arm64/boot/Image.gz kernel-output/
-          cp out/arch/arm64/boot/Image.gz-dtb kernel-output/
-          cd kernel-output
-          zip -9 -r ../Realme3-Kernel.zip .
 
+          cp \
+            out/arch/arm64/boot/Image.gz \
+            kernel-output/
+
+          cp \
+            out/arch/arm64/boot/Image.gz-dtb \
+            kernel-output/
+
+          # Include DTB separately as well.
+          DTB=$(find out/arch/arm64/boot/dts \
+            -type f \
+            -name "*.dtb" \
+            | head -n 1)
+
+          if [ -n "$DTB" ]; then
+            cp "$DTB" kernel-output/
+          fi
+
+          cd kernel-output
+
+          zip -9 -r \
+            ../Realme3-Kernel.zip \
+            .
+
+          cd ..
+
+          echo "========================================"
+          echo "Kernel package created"
+          echo "========================================"
+
+          ls -lh Realme3-Kernel.zip
+          unzip -l Realme3-Kernel.zip
+
+      # ---------------------------------------------------------
+      # Upload Artifact
+      # ---------------------------------------------------------
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Realme3-Kernel
           path: Realme3-Kernel.zip
           if-no-files-found: error
+
+      # ---------------------------------------------------------
+      # Upload Build Logs if build fails
+      # ---------------------------------------------------------
+      - name: Upload Build Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Realme3-Kernel-Logs
+          path: |
+            defconfig.log
+            build.log
+          if-no-files-found: ignore
