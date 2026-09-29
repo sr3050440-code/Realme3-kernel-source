@@ -49,30 +49,6 @@ jobs:
           echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
 
-      - name: Robust Fix for dtvgen.py Print Syntax
-        shell: bash
-        run: |
-          TARGET="tools/dtb/dtvgen.py"
-          if [ -f "$TARGET" ]; then
-            python3 -c '
-            path = "tools/dtb/dtvgen.py"
-            with open(path, "r") as f:
-                lines = f.readlines()
-            new_lines = []
-            for line in lines:
-                stripped = line.lstrip()
-                if stripped.startswith("print ") and not stripped.startswith("print("):
-                    indent = line[:len(line) - len(stripped)]
-                    expr = stripped[6:].rstrip()
-                    new_lines.append(f"{indent}print({expr})\n")
-                else:
-                    new_lines.append(line)
-            with open(path, "w") as f:
-                f.writelines(new_lines)
-            '
-            echo "Successfully converted print statements in dtvgen.py"
-          fi
-
       - name: Find Defconfig
         run: |
           find arch/arm64/configs -type f \( -iname '*oppo*' -o -iname '*6771*' -o -iname '*18601*' \) | sort
@@ -81,6 +57,27 @@ jobs:
         run: |
           rm -rf out
           mkdir -p out
+
+      - name: Ultimate Fix for dtvgen.py (Pre-Build)
+        shell: bash
+        run: |
+          TARGET="tools/dtb/dtvgen.py"
+          if [ -f "$TARGET" ]; then
+            python3 -c '
+            path = "tools/dtb/dtvgen.py"
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            
+            # Simple regex or string replacement for python2 print in dtvgen.py
+            import re
+            # Replaces print "text" or print x with print(text) or print(x)
+            fixed_content = re.sub(r"\bprint\s+([^\(\n]+)", r"print(\1)", content)
+            
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(fixed_content)
+            print("Successfully fixed dtvgen.py print statements via python regex.")
+            '
+          fi
 
       - name: Configure Kernel
         shell: bash
