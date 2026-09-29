@@ -326,6 +326,21 @@ jobs:
 
 
       # ============================================================
+      # PYTHON 2 TO 3 SCRIPT FIX FOR DTB
+      # ============================================================
+
+      - name: Fix Python Scripts for DTB Generation
+        shell: bash
+        run: |
+          echo "Fixing python print syntax in tools/dtb/dtvgen.py..."
+          if [ -f "tools/dtb/dtvgen.py" ]; then
+            sed -i 's/print \("[^"]*"\)/print(\1)/g' tools/dtb/dtvgen.py || true
+            sed -i 's/print \(\x27[^\x27]*\x27\)/print(\1)/g' tools/dtb/dtvgen.py || true
+            sed -i 's/print \([a-zA-Z0-9_]*\)/print(\1)/g' tools/dtb/dtvgen.py || true
+          fi
+
+
+      # ============================================================
       # BUILD KERNEL
       # ============================================================
 
