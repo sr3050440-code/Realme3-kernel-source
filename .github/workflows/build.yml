@@ -49,12 +49,28 @@ jobs:
           echo "HOSTCXXFLAGS=-fcommon" >> "$GITHUB_ENV"
           echo "KCFLAGS=-Wno-error" >> "$GITHUB_ENV"
 
-      - name: Fix Python Print in dtvgen.py
+      - name: Robust Fix for dtvgen.py Print Syntax
         shell: bash
         run: |
-          if [ -f "tools/dtb/dtvgen.py" ]; then
-            sed -i 's/\bprint \("[^"]*"\)/print(\1)/g' tools/dtb/dtvgen.py || true
-            sed -i "s/\bprint \('[^']*'\)/print(\1)/g" tools/dtb/dtvgen.py || true
+          TARGET="tools/dtb/dtvgen.py"
+          if [ -f "$TARGET" ]; then
+            python3 -c '
+            path = "tools/dtb/dtvgen.py"
+            with open(path, "r") as f:
+                lines = f.readlines()
+            new_lines = []
+            for line in lines:
+                stripped = line.lstrip()
+                if stripped.startswith("print ") and not stripped.startswith("print("):
+                    indent = line[:len(line) - len(stripped)]
+                    expr = stripped[6:].rstrip()
+                    new_lines.append(f"{indent}print({expr})\n")
+                else:
+                    new_lines.append(line)
+            with open(path, "w") as f:
+                f.writelines(new_lines)
+            '
+            echo "Successfully converted print statements in dtvgen.py"
           fi
 
       - name: Find Defconfig
